@@ -13,7 +13,7 @@ import java.util.UUID;
 @Service
 public class FfmpegService {
 
-  public File transcodeToHLS(File inputFile) throws  IOException, InterruptedException {
+  public static File transcodeToHLS(File inputFile) throws  IOException, InterruptedException {
     
     String outputDirName = "hls_output/" + UUID.randomUUID();
     File outputDir = new File(outputDirName);
