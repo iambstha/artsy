@@ -1,23 +1,25 @@
 package com.example.artsy.storage.impl;
 
+import com.example.artsy.processing.PhotoProcessService;
 import com.example.artsy.storage.MinioService;
+import com.example.artsy.util.FileUtilService;
 import io.minio.GetPresignedObjectUrlArgs;
 import io.minio.MinioClient;
 import io.minio.PutObjectArgs;
 import io.minio.http.Method;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.retry.annotation.Backoff;
 import org.springframework.retry.annotation.Retryable;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.util.UUID;
+import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
-@Slf4j
 @Service
 public class PhotoStorageService extends MinioService {
 
@@ -27,59 +29,56 @@ public class PhotoStorageService extends MinioService {
     private String BUCKET_NAME;
 
     @Value("${minio.url}")
-    private String baseUrl;
+    private String url;
+
+    private static final String SLASH = "/";
 
     public PhotoStorageService(MinioClient minioClient) {
         super(minioClient);
         this.minioClient = minioClient;
     }
 
-    /**
-     * Upload a photo to MinIO and return the stored object key.
-     */
-    public String uploadPhoto(MultipartFile file) {
-        String objectName = "photos/" + UUID.randomUUID() + "_" + file.getOriginalFilename();
-
-        try (InputStream is = file.getInputStream()) {
-            // Ensure the bucket exists
+    public String uploadPhoto(MultipartFile file) throws Exception {
+        File tempFile = null;
+        File hlsOutputDir = null;
+        try {
+            tempFile = FileUtilService.createTempFile(file);
+            hlsOutputDir = PhotoProcessService.transcodePhoto(tempFile);
             ensureBucketExists();
-
-            // Upload the photo
-            minioClient.putObject(
-                    PutObjectArgs.builder()
-                            .bucket(BUCKET_NAME)
-                            .object(objectName)
-                            .stream(is, file.getSize(), -1)
-                            .contentType(file.getContentType())
-                            .build()
-            );
-
-            log.info("Uploaded photo to Minio with object name: {}", objectName);
-            return objectName;
-
+            for (File chunk : Objects.requireNonNull(hlsOutputDir.listFiles())) {
+                try (InputStream inputStream = new FileInputStream(chunk)) {
+                    minioClient.putObject(
+                            PutObjectArgs.builder()
+                                    .bucket(BUCKET_NAME)
+                                    .object(objectKey(file, chunk.getName()))
+                                    .stream(inputStream, chunk.length(), -1)
+                                    .contentType(FileUtilService.getContentType(chunk.getName()))
+                                    .build()
+                    );
+                }
+            }
+            return makeStreamUrl(url, BUCKET_NAME, file);
+        } catch (IOException e) {
+            throw e;
         } catch (Exception e) {
-            log.error("Failed to upload photo to MinIO", e);
-            throw new RuntimeException("Photo upload failed", e);
+            throw e;
+        } finally {
+            FileUtilService.deleteSafely(tempFile);
+            FileUtilService.deleteDirectoryQuietly(hlsOutputDir);
         }
     }
 
-    /**
-     * Generates a pre-signed URL for uploading an object to Minio.
-     * The URL will expire after the specified number of minutes.
-     * This method is retryable in case of connection failures to Minio.
-     *
-     * @param objectName    The name of the object to be uploaded.
-     * @param expiryMinutes The expiry time for the URL in minutes.
-     * @return A pre-signed URL string for PUT operation.
-     * @throws RuntimeException If an error occurs during URL generation after retries.
-     */
+    private String makeStreamUrl(String url, String bucketName, MultipartFile file) {
+        String baseName = Objects.requireNonNull(file.getOriginalFilename()).replaceAll("\\.[^.]+$", "");
+        return url + SLASH + bucketName + SLASH + baseName + SLASH + "playlist.m3u8";
+    }
+
     @Retryable(
             value = { IOException.class },
             maxAttempts = 3,
             backoff = @Backoff(delay = 1000, multiplier = 2)
     )
-    public String getPresignedUrl(String objectName, int expiryMinutes) {
-//        log.info("Attempting to generate pre-signed upload URL for object: {} (attempt {})", objectName, org.springframework.retry.support.RetrySynchronizationManager.getContext().getRetryCount() + 1);
+    public String getPreSignedUrl(String objectName, int expiryMinutes) {
         try {
             return minioClient.getPresignedObjectUrl(
                     GetPresignedObjectUrlArgs.builder()
@@ -89,13 +88,10 @@ public class PhotoStorageService extends MinioService {
                             .expiry(expiryMinutes, TimeUnit.MINUTES)
                             .build()
             );
-        } catch (IOException e) { // Catch IOException directly
-            log.warn("Minio connection or I/O failed for pre-signed URL generation. Retrying...", e);
+        } catch (IOException e) {
             throw new RuntimeException("Minio connection issue, triggering retry.", e);
         } catch (Exception e) {
-            log.error("Failed to generate pre-signed URL for object: {}", objectName, e);
             throw new RuntimeException("Failed to generate pre-signed URL", e);
         }
     }
-
 }

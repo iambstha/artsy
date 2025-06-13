@@ -12,28 +12,16 @@ import java.io.IOException;
 @Service
 public class FileUtilService {
 
-    /**
-     * Creates a temporary file from a MultipartFile.
-     *
-     * @param file The MultipartFile to convert to a temporary File.
-     * @return A new temporary File containing the content of the MultipartFile.
-     * @throws IOException If an I/O error occurs during file transfer.
-     */
-    public File createTempFile(MultipartFile file) throws IOException {
-        // Create a temporary file with a prefix and the original filename as suffix
+    private static final String PLAYLIST_FILE_CONTENT_TYPE = "application/vnd.apple.mpegurl";
+    private static final String VIDEO_MP2T_CONTENT_TYPE = "video/MP2T";
+
+    public static File createTempFile(MultipartFile file) throws IOException {
         File tempFile = File.createTempFile("upload-", file.getOriginalFilename());
-        // Transfer the content of the MultipartFile to the temporary file
         file.transferTo(tempFile);
-        log.info("Created temporary file: {}", tempFile.getAbsolutePath());
         return tempFile;
     }
 
-    /**
-     * Safely deletes a file. Logs a warning if the file exists but cannot be deleted.
-     *
-     * @param file The File to be deleted.
-     */
-    public void deleteSafely(File file) {
+    public static void deleteSafely(File file) {
         if (file != null && file.exists()) {
             if (!file.delete()) {
                 log.warn("Failed to delete temp file {}", file.getAbsolutePath());
@@ -43,12 +31,7 @@ public class FileUtilService {
         }
     }
 
-    /**
-     * Safely deletes a directory and its contents recursively. This method will not throw an exception.
-     *
-     * @param directory The directory to be deleted.
-     */
-    public void deleteDirectoryQuietly(File directory) {
+    public static void deleteDirectoryQuietly(File directory) {
         if (directory != null && directory.exists() && directory.isDirectory()) {
             try {
                 FileUtils.deleteDirectory(directory);
@@ -58,4 +41,17 @@ public class FileUtilService {
             }
         }
     }
+
+    public static String getContentType(String filename) {
+        return filename.endsWith(".m3u8") ? PLAYLIST_FILE_CONTENT_TYPE : VIDEO_MP2T_CONTENT_TYPE;
+    }
+
+    public static String getPhotoContentType(String fileName) {
+        if (fileName.endsWith(".jpg") || fileName.endsWith(".jpeg")) return "image/jpeg";
+        if (fileName.endsWith(".png")) return "image/png";
+        if (fileName.endsWith(".gif")) return "image/gif";
+        return "application/octet-stream";
+    }
+
+
 }
