@@ -86,8 +86,6 @@ public class VideoServiceImpl extends MinioService {
                 }
             }
             return makeStreamUrl(url, BUCKET_NAME, file);
-        } catch (IOException e) {
-            throw e;
         } catch (Exception e) {
             throw e;
         } finally {
@@ -109,8 +107,6 @@ public class VideoServiceImpl extends MinioService {
                             .object(objectName)
                             .build()
             );
-        } catch (IOException e) {
-            throw e;
         } catch (Exception e) {
             throw e;
         }
